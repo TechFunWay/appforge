@@ -1,0 +1,22 @@
+# 本地临时与调试文件（家族约定：临时物一律进 tmp/）
+tmp/*
+!tmp/.gitkeep
+
+# 运行数据与构建产物
+data/
+db/
+logs/
+uploads/
+dist/
+build/
+release/
+node_modules/
+*.fpk
+*.db
+*.log
+
+# 编辑器与工具目录
+.DS_Store
+.idea/
+.vscode/
+.opencode/
