@@ -87,10 +87,12 @@ curl -s localhost:8080/api/version
 ```go
 func init() {
 	apps.Register(apps.App{
-		Name: "note", DisplayName: "笔记",
-		Setup: func(api *gin.RouterGroup, db *gorm.DB) {
-			g := api.Group("/notes", middleware.Auth())
-			g.GET("", listNotes)
+		Name: "note", DisplayName: "笔记", RoutePrefix: "/note",
+		// 三个钩子按需选：Setup 公开组、SetupAuth 认证组、SetupAdmin 仅管理员。
+		// 认证与写操作审计由中间件负责，业务侧只管自己的数据。
+		SetupAuth: func(api *gin.RouterGroup, db *gorm.DB) {
+			g := api.Group("/notes")
+			g.GET("", listNotes) // 当前用户取 c.GetUint("userID")
 		},
 	})
 	database.RegisterModels(&Note{})

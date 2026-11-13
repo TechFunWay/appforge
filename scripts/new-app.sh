@@ -34,12 +34,15 @@ PKG=${NAME//-/}
 PKG=${PKG//./}
 mkdir -p "$OUT/server/$PKG" "$OUT/tmp" "$OUT/.gitea/workflows"
 : > "$OUT/tmp/.gitkeep"
-echo "==> 生成 $OUT（Go 包名 $PKG，默认端口 $PORT）"
+echo "==> 生成 ${OUT}（Go 包名 ${PKG}，默认端口 ${PORT}）"
 
-# tpl 用占位符做替换：模板一律用带引号的 heredoc 写，Go 结构体标签里的反引号才不会被 shell 吃掉。
+# 模板一律用带引号的 heredoc 写，这样 Go 结构体标签里的反引号不会被 shell 吃掉；
+# 变量与制表符用占位符替换（BSD sed 不认 \t，所以先用 printf 造一个真制表符）。
+TAB=$(printf "\t")
 tpl() {
   sed -e "s|@NAME@|$NAME|g" -e "s|@PKG@|$PKG|g" -e "s|@DISPLAY@|$DISPLAY|g" \
-      -e "s|@PORT@|$PORT|g" -e "s|@MOD@|$MOD|g" -e "s|@LIB@|$LIB_VERSION|g"
+      -e "s|@PORT@|$PORT|g" -e "s|@MOD@|$MOD|g" -e "s|@LIB@|$LIB_VERSION|g" \
+      -e "s|@TAB@|$TAB|g"
 }
 
 tpl > "$OUT/server/go.mod" <<"GOSRC"
@@ -58,193 +61,195 @@ tpl > "$OUT/server/main.go" <<"GOSRC"
 package main
 
 import (
-    // 空白导入即注册：业务包在自己的 init() 里把模型、配置项与路由挂进底座。
-    _ "@NAME@/server/@PKG@"
+@TAB@// 空白导入即注册：业务包在自己的 init() 里把模型、配置项与路由挂进底座。
+@TAB@_ "@NAME@/server/@PKG@"
 
-    "@MOD@/kit/config"
-    "@MOD@/kit/server"
-    "@MOD@/kit/version"
+@TAB@"@MOD@/kit/config"
+@TAB@"@MOD@/kit/server"
+@TAB@"@MOD@/kit/version"
 )
 
 func main() {
-    // 应用身份只在这里声明一次：端口、网关前缀、数据库文件名与发版仓库都由它推导，
-    // 不必再复制一份 config.go / version.go 回来改。
-    version.Configure(version.Identity{
-        Name:        "techfunway-@NAME@",
-        DisplayName: "@DISPLAY@",
-        DefaultPort: @PORT@,
-    })
+@TAB@// 应用身份只在这里声明一次：端口、网关前缀、数据库文件名与发版仓库都由它推导，
+@TAB@// 不必再复制一份 config.go / version.go 回来改。
+@TAB@version.Configure(version.Identity{
+@TAB@@TAB@Name:        "techfunway-@NAME@",
+@TAB@@TAB@DisplayName: "@DISPLAY@",
+@TAB@@TAB@DefaultPort: @PORT@,
+@TAB@})
 
-    config.LoadDotEnv(".env", "server/.env")
-    config.Parse()
-    server.Start()
+@TAB@config.LoadDotEnv(".env", "server/.env")
+@TAB@config.Parse()
+@TAB@server.Start()
 }
 GOSRC
 
-tpl > "$OUT/server/@PKG@/app.go" <<"GOSRC"
+tpl > "$OUT/server/$PKG/app.go" <<"GOSRC"
 package @PKG@
 
 import (
-    "@MOD@/kit/apps"
-    "@MOD@/kit/database"
-    "@MOD@/kit/sysconfig"
+@TAB@"@MOD@/kit/apps"
+@TAB@"@MOD@/kit/database"
+@TAB@"@MOD@/kit/sysconfig"
 
-    "github.com/gin-gonic/gin"
-    "gorm.io/gorm"
+@TAB@"github.com/gin-gonic/gin"
+@TAB@"gorm.io/gorm"
 )
 
 // init 是本应用与底座的全部接线：注册模型、注册配置项、注册路由。
 func init() {
-    database.RegisterModels(&Item{})
+@TAB@database.RegisterModels(&Item{})
 
-    sysconfig.RegisterConfig(sysconfig.ConfigDef{
-        Key:         "@PKG@_page_size",
-        Scope:       sysconfig.ScopeUser,
-        Type:        sysconfig.TypeInt,
-        Default:     "20",
-        Group:       "@PKG@",
-        Label:       "@DISPLAY@ 每页条数",
-        Description: "列表分页大小，1 到 100",
-    })
+@TAB@sysconfig.RegisterConfig(sysconfig.ConfigDef{
+@TAB@@TAB@Key:         "@PKG@_page_size",
+@TAB@@TAB@Scope:       sysconfig.ScopeUser,
+@TAB@@TAB@Type:        sysconfig.TypeInt,
+@TAB@@TAB@Default:     "20",
+@TAB@@TAB@Group:       "@PKG@",
+@TAB@@TAB@Label:       "@DISPLAY@ 每页条数",
+@TAB@@TAB@Description: "列表分页大小，1 到 100",
+@TAB@})
 
-    apps.Register(apps.App{
-        Name:        "@PKG@",
-        DisplayName: "@DISPLAY@",
-        RoutePrefix: "/@PKG@",
-        NavPosition: 100,
-        Setup:       setupRoutes,
-    })
+@TAB@apps.Register(apps.App{
+@TAB@@TAB@Name:        "@PKG@",
+@TAB@@TAB@DisplayName: "@DISPLAY@",
+@TAB@@TAB@RoutePrefix: "/@PKG@",
+@TAB@@TAB@NavPosition: 100,
+@TAB@@TAB@// SetupAuth 挂到认证组：未登录请求由底座中间件直接 401。
+@TAB@@TAB@// 公开接口用 Setup，仅管理员接口用 SetupAdmin。
+@TAB@@TAB@SetupAuth:     setupRoutes,
+@TAB@})
 }
 
 // setupRoutes 收到的 api 已由底座挂好认证与审计中间件。
 func setupRoutes(api *gin.RouterGroup, db *gorm.DB) {
-    g := api.Group("/@PKG@")
-    g.GET("", handleList(db))
-    g.POST("", handleCreate(db))
-    g.PUT("/:id", handleUpdate(db))
-    g.DELETE("/:id", handleDelete(db))
+@TAB@g := api.Group("/@PKG@")
+@TAB@g.GET("", handleList(db))
+@TAB@g.POST("", handleCreate(db))
+@TAB@g.PUT("/:id", handleUpdate(db))
+@TAB@g.DELETE("/:id", handleDelete(db))
 }
 GOSRC
 
-tpl > "$OUT/server/@PKG@/models.go" <<"GOSRC"
+tpl > "$OUT/server/$PKG/models.go" <<"GOSRC"
 package @PKG@
 
 import "time"
 
 // Item 是示例业务表：按用户隔离。
 type Item struct {
-    ID        uint      `gorm:"primarykey"`
-    UserID    uint      `gorm:"index;not null"`
-    Title     string    `gorm:"size:200;not null"`
-    Note      string    `gorm:"size:2000"`
-    CreatedAt time.Time
-    UpdatedAt time.Time
+@TAB@ID        uint      `gorm:"primarykey"`
+@TAB@UserID    uint      `gorm:"index;not null"`
+@TAB@Title     string    `gorm:"size:200;not null"`
+@TAB@Note      string    `gorm:"size:2000"`
+@TAB@CreatedAt time.Time
+@TAB@UpdatedAt time.Time
 }
 GOSRC
 
-tpl > "$OUT/server/@PKG@/handler.go" <<"GOSRC"
+tpl > "$OUT/server/$PKG/handler.go" <<"GOSRC"
 package @PKG@
 
 import (
-    "@MOD@/kit/audit"
-    "@MOD@/kit/response"
-    "@MOD@/kit/utils"
+@TAB@"@MOD@/kit/audit"
+@TAB@"@MOD@/kit/response"
+@TAB@"@MOD@/kit/utils"
 
-    "github.com/gin-gonic/gin"
-    "gorm.io/gorm"
+@TAB@"github.com/gin-gonic/gin"
+@TAB@"gorm.io/gorm"
 )
 
 func handleList(db *gorm.DB) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        userID := c.GetUint("userID")
-        if userID == 0 {
-            response.ErrorUnauthorized(c, "未授权")
-            return
-        }
-        page, pageSize := utils.NormalizePage(utils.Atoi(c.Query("page"), 1), utils.Atoi(c.Query("pageSize"), 20))
+@TAB@return func(c *gin.Context) {
+@TAB@@TAB@userID := c.GetUint("userID")
+@TAB@@TAB@if userID == 0 {
+@TAB@@TAB@@TAB@response.ErrorUnauthorized(c, "未授权")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@page, pageSize := utils.NormalizePage(utils.Atoi(c.Query("page"), 1), utils.Atoi(c.Query("pageSize"), 20))
 
-        var total int64
-        if err := db.Model(&Item{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
-            response.ErrorInternal(c, "统计失败")
-            return
-        }
-        var items []Item
-        if err := db.Where("user_id = ?", userID).Order("id desc").
-            Limit(pageSize).Offset(utils.Offset(page, pageSize)).Find(&items).Error; err != nil {
-            response.ErrorInternal(c, "查询失败")
-            return
-        }
-        response.SuccessPage(c, items, total, page, pageSize)
-    }
+@TAB@@TAB@var total int64
+@TAB@@TAB@if err := db.Model(&Item{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
+@TAB@@TAB@@TAB@response.ErrorInternal(c, "统计失败")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@var items []Item
+@TAB@@TAB@if err := db.Where("user_id = ?", userID).Order("id desc").
+@TAB@@TAB@@TAB@Limit(pageSize).Offset(utils.Offset(page, pageSize)).Find(&items).Error; err != nil {
+@TAB@@TAB@@TAB@response.ErrorInternal(c, "查询失败")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@response.SuccessPage(c, items, total, page, pageSize)
+@TAB@}
 }
 
 type itemPayload struct {
-    Title string `json:"title" binding:"required,max=200"`
-    Note  string `json:"note" binding:"max=2000"`
+@TAB@Title string `json:"title" binding:"required,max=200"`
+@TAB@Note  string `json:"note" binding:"max=2000"`
 }
 
 func handleCreate(db *gorm.DB) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        userID := c.GetUint("userID")
-        if userID == 0 {
-            response.ErrorUnauthorized(c, "未授权")
-            return
-        }
-        var p itemPayload
-        if err := c.ShouldBindJSON(&p); err != nil {
-            response.ErrorBadRequest(c, "标题必填，且不超过 200 字")
-            return
-        }
-        item := Item{UserID: userID, Title: p.Title, Note: p.Note}
-        if err := db.Create(&item).Error; err != nil {
-            response.ErrorInternal(c, "创建失败")
-            return
-        }
-        audit.Log(db, c, "@PKG@_create", "Item", item.ID, p.Title)
-        response.Success(c, item)
-    }
+@TAB@return func(c *gin.Context) {
+@TAB@@TAB@userID := c.GetUint("userID")
+@TAB@@TAB@if userID == 0 {
+@TAB@@TAB@@TAB@response.ErrorUnauthorized(c, "未授权")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@var p itemPayload
+@TAB@@TAB@if err := c.ShouldBindJSON(&p); err != nil {
+@TAB@@TAB@@TAB@response.ErrorBadRequest(c, "标题必填，且不超过 200 字")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@item := Item{UserID: userID, Title: p.Title, Note: p.Note}
+@TAB@@TAB@if err := db.Create(&item).Error; err != nil {
+@TAB@@TAB@@TAB@response.ErrorInternal(c, "创建失败")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@audit.Log(db, c, "@PKG@_create", "Item", item.ID, p.Title)
+@TAB@@TAB@response.Success(c, item)
+@TAB@}
 }
 
 func handleUpdate(db *gorm.DB) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        userID := c.GetUint("userID")
-        id := utils.Atoi(c.Param("id"), 0)
-        var p itemPayload
-        if err := c.ShouldBindJSON(&p); err != nil {
-            response.ErrorBadRequest(c, "标题必填，且不超过 200 字")
-            return
-        }
-        res := db.Model(&Item{}).Where("id = ? AND user_id = ?", id, userID).
-            Updates(map[string]interface{}{"title": p.Title, "note": p.Note})
-        if res.Error != nil {
-            response.ErrorInternal(c, "更新失败")
-            return
-        }
-        if res.RowsAffected == 0 {
-            response.ErrorNotFound(c, "记录不存在或无权修改")
-            return
-        }
-        audit.Log(db, c, "@PKG@_update", "Item", uint(id), p.Title)
-        response.Success(c, gin.H{"id": id})
-    }
+@TAB@return func(c *gin.Context) {
+@TAB@@TAB@userID := c.GetUint("userID")
+@TAB@@TAB@id := utils.Atoi(c.Param("id"), 0)
+@TAB@@TAB@var p itemPayload
+@TAB@@TAB@if err := c.ShouldBindJSON(&p); err != nil {
+@TAB@@TAB@@TAB@response.ErrorBadRequest(c, "标题必填，且不超过 200 字")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@res := db.Model(&Item{}).Where("id = ? AND user_id = ?", id, userID).
+@TAB@@TAB@@TAB@Updates(map[string]interface{}{"title": p.Title, "note": p.Note})
+@TAB@@TAB@if res.Error != nil {
+@TAB@@TAB@@TAB@response.ErrorInternal(c, "更新失败")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@if res.RowsAffected == 0 {
+@TAB@@TAB@@TAB@response.ErrorNotFound(c, "记录不存在或无权修改")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@audit.Log(db, c, "@PKG@_update", "Item", uint(id), p.Title)
+@TAB@@TAB@response.Success(c, gin.H{"id": id})
+@TAB@}
 }
 
 func handleDelete(db *gorm.DB) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        userID := c.GetUint("userID")
-        id := utils.Atoi(c.Param("id"), 0)
-        res := db.Where("id = ? AND user_id = ?", id, userID).Delete(&Item{})
-        if res.Error != nil {
-            response.ErrorInternal(c, "删除失败")
-            return
-        }
-        if res.RowsAffected == 0 {
-            response.ErrorNotFound(c, "记录不存在或无权删除")
-            return
-        }
-        audit.Log(db, c, "@PKG@_delete", "Item", uint(id), "")
-        response.Success(c, gin.H{"id": id})
-    }
+@TAB@return func(c *gin.Context) {
+@TAB@@TAB@userID := c.GetUint("userID")
+@TAB@@TAB@id := utils.Atoi(c.Param("id"), 0)
+@TAB@@TAB@res := db.Where("id = ? AND user_id = ?", id, userID).Delete(&Item{})
+@TAB@@TAB@if res.Error != nil {
+@TAB@@TAB@@TAB@response.ErrorInternal(c, "删除失败")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@if res.RowsAffected == 0 {
+@TAB@@TAB@@TAB@response.ErrorNotFound(c, "记录不存在或无权删除")
+@TAB@@TAB@@TAB@return
+@TAB@@TAB@}
+@TAB@@TAB@audit.Log(db, c, "@PKG@_delete", "Item", uint(id), "")
+@TAB@@TAB@response.Success(c, gin.H{"id": id})
+@TAB@}
 }
 GOSRC
 
@@ -290,11 +295,7 @@ tpl > "$OUT/README.md" <<"GOSRC"
 
 ```bash
 cd server && go mod tidy && go run . -port @PORT@ -data-dir ../data -log-console
-```
-
-```bash
-make build   # 产物在 tmp/@NAME@，ldflags 会注入版本与应用名
-make run
+make build && make run   # ldflags 注入版本与应用名
 ```
 GOSRC
 
@@ -317,15 +318,15 @@ LDFLAGS := -s -w -X @MOD@/kit/version.Version=$(shell cat VERSION) -X @MOD@/kit/
 
 .PHONY: build run test vet tidy
 build:
-    cd server && CGO_ENABLED=1 $(GO) build -ldflags "$(LDFLAGS)" -o ../tmp/$(APP) .
+@TAB@cd server && CGO_ENABLED=1 $(GO) build -ldflags "$(LDFLAGS)" -o ../tmp/$(APP) .
 run: build
-    ./tmp/$(APP) -port @PORT@ -data-dir ./data -log-console
+@TAB@./tmp/$(APP) -port @PORT@ -data-dir ./data -log-console
 test:
-    cd server && $(GO) test ./...
+@TAB@cd server && $(GO) test ./...
 vet:
-    cd server && $(GO) vet ./...
+@TAB@cd server && $(GO) vet ./...
 tidy:
-    cd server && $(GO) mod tidy
+@TAB@cd server && $(GO) mod tidy
 GOSRC
 
 tpl > "$OUT/.gitea/workflows/ci.yml" <<"GOSRC"
@@ -344,10 +345,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - name: 指向自建 Gitea 拉公共库
+      - name: 离线内网构建时才需要改写公共库地址
         run: |
-          go env -w GOPRIVATE=github.com/TechFunWay/* GOSUMDB=off GOPROXY=direct
-          # 公共库已在 GitHub 公开，无需改写；仅离线内网构建时设 APPFORGE_SSH 覆盖
           if [ -n "${APPFORGE_SSH:-}" ]; then git config --global url."$APPFORGE_SSH".insteadOf https://github.com/TechFunWay/appforge; fi
       - run: cd server && go mod tidy
       - run: cd server && go vet ./...
@@ -361,7 +360,6 @@ if go mod tidy >/dev/null 2>&1 && go build ./... >/dev/null 2>&1; then
   echo "==> 通过"
 else
   echo "!! 自检失败。请进 $OUT/server 手动执行 go mod tidy 看原因" >&2
-  echo "   多半是本机没配公共库的地址改写，见 $HERE/README.md 的这一段" >&2
   exit 2
 fi
 
@@ -374,8 +372,8 @@ cat <<"GOSRC"
 
 还没做（公共库不提供，必须人工补）：
   1. 前端 web/：目前未抽包，从 smallgo/web 起步，按技能 mobile-ui 与 icon-design 调整
-  2. fnpack/ 与 app.json：同上起步，包名 6 处一致性按记忆 fnos-packaging 核对
+  2. fnpack/ 与 app.json：同上起步，包名 6 个位置按记忆 fnos-packaging 核对
   3. 自建 Gitea 建仓并推送（见记忆 sub-repositories.md）
-  4. 父仓库 .gitignore 第 1 节补一行；按技能 app-analysis 建档案并更新 INDEX 总表与端口家族
+  4. 父仓库 .gitignore 第 1 节补一行；按技能 app-analysis 建档案、更新 INDEX 总表与端口家族
   5. 门户 techfunway-web 补介绍页；按技能 local-app-instance 建本机 86xx 实例
 GOSRC
