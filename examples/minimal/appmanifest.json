@@ -1,0 +1,7 @@
+{
+  "name": "minimal",
+  "displayName": "AppForge 示例应用",
+  "version": "0.1.0",
+  "desc": "演示 AppForge 底座接入方式的最小应用",
+  "port": 8080
+}

@@ -29,25 +29,34 @@ go get github.com/TechFunWay/appforge@latest
 package main
 
 import (
+	_ "embed"
+
 	"github.com/TechFunWay/appforge/kit/config"
+	"github.com/TechFunWay/appforge/kit/manifest"
 	"github.com/TechFunWay/appforge/kit/server"
-	"github.com/TechFunWay/appforge/kit/version"
 
 	_ "github.com/TechFunWay/appforge/kit/qrcode" // 空白导入即注册业务模块
 )
 
+//go:embed appmanifest.json
+var manifestData []byte
+
 func main() {
-	// 1. 注入应用身份：端口、网关前缀、数据库文件名、发版仓库都由它推导，
-	//    不必再复制一份 config.go / version.go 回来改。
-	version.Configure(version.Identity{
-		Name:        "techfunway-notes",
-		DisplayName: "我的笔记",
-		DefaultPort: 8914,
-	})
+	// 1. 注入应用身份：appmanifest.json 是身份与打包元数据的唯一真源，
+	//    端口、网关前缀、数据库文件名、发版仓库都由它推导。
+	manifest.MustParse(manifestData).Inject()
 	config.LoadDotEnv(".env")
 	config.Parse()
 	server.Start() // 迁移、路由、日志、调度器、优雅退出都在底座里
 }
+```
+
+清单旁边放一份 `CHANGELOG.md`，构建期跑一次派生器，`VERSION`、`app.json`、
+`fnpack/manifest` 三份打包元数据就永远和清单一致（脚手架已在 `make build`
+与 CI 里挂了 `gen-manifest -check` 门禁）：
+
+```bash
+go run github.com/TechFunWay/appforge/cmd/gen-manifest -dir . -write
 ```
 
 完整可跑示例见 `examples/minimal`：
@@ -63,7 +72,9 @@ curl -s localhost:8080/api/version
 |---|---|
 | `kit/response` | 统一响应体 `{code, message, data}` |
 | `kit/config` | 启动参数与环境变量（`-port`、`-data-dir`、`-fnos-app`、`-gateway-prefix` 等） |
-| `kit/version` | 构建信息与**应用身份注入**（`Identity` / `Configure`） |
+| `kit/version` | 构建信息与应用身份（`Identity` / `Configure`；一般经 `kit/manifest` 注入） |
+| `kit/manifest` | **应用清单唯一真源**：`appmanifest.json` 的解析、大小写敏感校验、身份注入与打包元数据派生 |
+| `cmd/gen-manifest` | 构建期工具：从清单 + CHANGELOG.md 派生 `VERSION` / `app.json` / `fnpack/manifest`，`-check` 做一致性门禁 |
 | `kit/logger` | 文件日志、保留策略、可选同时输出终端 |
 | `kit/database` | GORM + SQLite（WAL、外键、单连接）、模型注册、版本化升降级、用户删除守卫与清理钩子 |
 | `kit/auth` | JWT 签发与校验，TTL 跟随 `login_expiry_days` |

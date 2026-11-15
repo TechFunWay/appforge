@@ -5,15 +5,19 @@
 # 公共能力通过 go.mod 引用 appforge。
 #
 # 用法：
-#   ./scripts/new-app.sh <仓库名> "<显示名>" [默认端口] [生成目录]
+#   ./scripts/new-app.sh <仓库名> "<显示名>" [默认端口] [生成目录] ["<一句话描述>"]
 # 例：
 #   ./scripts/new-app.sh notes "我的笔记" 8914
+#
+# 应用身份与打包元数据的唯一真源是生成的 server/appmanifest.json：
+# VERSION / app.json / fnpack/manifest 三份产物由 cmd/gen-manifest 派生，禁止手改；
+# 发版只改 appmanifest.json 的 version（+ CHANGELOG.md），然后 make gen。
 #
 # 生成后自动跑 go mod tidy + go build 自检，失败就明确报错，不留半成品。
 set -euo pipefail
 
 MOD=github.com/TechFunWay/appforge
-LIB_VERSION=v0.0.1
+LIB_VERSION=v0.0.3
 
 if [[ $# -lt 2 ]]; then
   echo "用法: $0 仓库名 显示名 [默认端口] [生成目录]" >&2
@@ -25,6 +29,7 @@ DISPLAY=$2
 PORT=${3:-8914}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT=${4:-"$(dirname "$HERE")/$NAME"}
+DESC=${5:-"@DISPLAY@：基于 AppForge 底座的应用（登录、权限、审计、备份、实时、统计由底座提供）"}
 
 [[ $NAME =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "仓库名只能是小写字母、数字与连字符且以字母开头: $NAME" >&2; exit 1; }
 [[ $PORT =~ ^[0-9]+$ ]] || { echo "端口必须是数字: $PORT" >&2; exit 1; }
@@ -42,7 +47,7 @@ TAB=$(printf "\t")
 tpl() {
   sed -e "s|@NAME@|$NAME|g" -e "s|@PKG@|$PKG|g" -e "s|@DISPLAY@|$DISPLAY|g" \
       -e "s|@PORT@|$PORT|g" -e "s|@MOD@|$MOD|g" -e "s|@LIB@|$LIB_VERSION|g" \
-      -e "s|@TAB@|$TAB|g"
+      -e "s|@DESC@|$DESC|g" -e "s|@TAB@|$TAB|g"
 }
 
 tpl > "$OUT/server/go.mod" <<"GOSRC"
@@ -61,26 +66,39 @@ tpl > "$OUT/server/main.go" <<"GOSRC"
 package main
 
 import (
+@TAB@_ "embed"
+
 @TAB@// 空白导入即注册：业务包在自己的 init() 里把模型、配置项与路由挂进底座。
 @TAB@_ "@NAME@/server/@PKG@"
 
 @TAB@"@MOD@/kit/config"
+@TAB@"@MOD@/kit/manifest"
 @TAB@"@MOD@/kit/server"
-@TAB@"@MOD@/kit/version"
 )
 
+// appmanifest.json 是应用身份与打包元数据的唯一真源（清单坏了应用起不来，
+// 这是特性不是缺陷：绝不带着错误身份继续跑）。
+//
+@TAB@//go:embed appmanifest.json
+var manifestData []byte
+
 func main() {
-@TAB@// 应用身份只在这里声明一次：端口、网关前缀、数据库文件名与发版仓库都由它推导，
-@TAB@// 不必再复制一份 config.go / version.go 回来改。
-@TAB@version.Configure(version.Identity{
-@TAB@@TAB@Name:        "techfunway-@NAME@",
-@TAB@@TAB@DisplayName: "@DISPLAY@",
-@TAB@@TAB@DefaultPort: @PORT@,
-@TAB@})
+@TAB@// 身份注入只此一处：端口、网关前缀、数据库文件名、发版仓库全部由清单推导。
+@TAB@manifest.MustParse(manifestData).Inject()
 
 @TAB@config.LoadDotEnv(".env", "server/.env")
 @TAB@config.Parse()
 @TAB@server.Start()
+}
+GOSRC
+
+tpl > "$OUT/server/appmanifest.json" <<"GOSRC"
+{
+  "name": "@NAME@",
+  "displayName": "@DISPLAY@",
+  "version": "0.1.0",
+  "desc": "@DESC@",
+  "port": @PORT@
 }
 GOSRC
 
@@ -273,10 +291,6 @@ node_modules/
 .mimocode/
 GOSRC
 
-tpl > "$OUT/VERSION" <<"GOSRC"
-v0.1.0
-GOSRC
-
 tpl > "$OUT/CHANGELOG.md" <<"GOSRC"
 # @DISPLAY@ 更新日志
 
@@ -295,7 +309,8 @@ tpl > "$OUT/README.md" <<"GOSRC"
 
 ```bash
 cd server && go mod tidy && go run . -port @PORT@ -data-dir ../data -log-console
-make build && make run   # ldflags 注入版本与应用名
+make build && make run   # 构建前自动校验打包元数据与 appmanifest.json 一致
+make gen                 # 从 server/appmanifest.json 重新派生 VERSION / app.json / fnpack/manifest
 ```
 GOSRC
 
@@ -304,10 +319,13 @@ tpl > "$OUT/AGENTS.md" <<"GOSRC"
 
 - 底座：依赖 `@MOD@`；公共能力一律复用，**不要把框架代码复制回本仓库**。
 - 业务代码在 `server/@PKG@/`，通过 `apps.Register` 自注册；当前用户取 `c.GetUint("userID")`。
-- 应用身份只在 `server/main.go` 的 `version.Configure` 里声明一次
-  （包名 techfunway-@NAME@、默认端口 @PORT@、网关前缀 /app/techfunway-@NAME@）。
-- 前端与 fnpack 目前**不在底座里**（尚未抽包），起步请从 smallgo 复制再逐处核对：
-  包名 6 个位置见父仓库记忆 `.agents/memory/fnos-packaging.md`，图标见技能 `icon-design`。
+- 应用身份与打包元数据只在 `server/appmanifest.json` 声明一次（包名 techfunway-@NAME@、
+  端口 @PORT@、网关前缀、版本、描述、发版仓库全部由它推导）。
+- VERSION / app.json / fnpack/manifest 是派生产物，**禁止手改**：改完清单跑 `make gen`，
+  `make build` 与 CI 都会用 `make check-meta` 做一致性门禁。
+- 发版流程：改 `server/appmanifest.json` 的 version + 写 `CHANGELOG.md` 新小节 → `make gen`。
+- fnpack 的 cmd 脚本与图标目前**不在底座里**，起步从 smallgo 复制再核对：
+  包名各位置见父仓库记忆 `.agents/memory/fnos-packaging.md`，图标见技能 `icon-design`。
 - 提交备注：`类型(@DISPLAY@)：备注`，全中文两字类型，见技能 `commit-notes`。
 GOSRC
 
@@ -316,8 +334,14 @@ GO ?= go
 APP := @NAME@
 LDFLAGS := -s -w -X @MOD@/kit/version.Version=$(shell cat VERSION) -X @MOD@/kit/version.AppName=techfunway-@NAME@
 
-.PHONY: build run test vet tidy
-build:
+.PHONY: build run test vet tidy gen check-meta
+# gen：从 server/appmanifest.json（+ CHANGELOG.md）派生 VERSION / app.json / fnpack/manifest
+gen:
+@TAB@cd server && $(GO) run @MOD@/cmd/gen-manifest -dir .. -write
+# check-meta：构建期一致性门禁（产物与真源漂移就失败，CI 必跑）
+check-meta:
+@TAB@cd server && $(GO) run @MOD@/cmd/gen-manifest -dir .. -check
+build: check-meta
 @TAB@cd server && CGO_ENABLED=1 $(GO) build -ldflags "$(LDFLAGS)" -o ../tmp/$(APP) .
 run: build
 @TAB@./tmp/$(APP) -port @PORT@ -data-dir ./data -log-console
@@ -350,29 +374,35 @@ jobs:
           if [ -n "${APPFORGE_SSH:-}" ]; then git config --global url."$APPFORGE_SSH".insteadOf https://github.com/TechFunWay/appforge; fi
       - run: cd server && go mod tidy
       - run: cd server && go vet ./...
+      - name: 打包元数据与真源一致性门禁
+        run: cd server && go run @MOD@/cmd/gen-manifest -dir .. -check
       - run: cd server && go build ./...
       - run: cd server && go test ./...
 GOSRC
 
-echo "==> 自检：go mod tidy + go build"
+echo "==> 自检：派生元数据 + go mod tidy + go build + 一致性校验"
 cd "$OUT/server"
-if go mod tidy >/dev/null 2>&1 && go build ./... >/dev/null 2>&1; then
-  echo "==> 通过"
+gen_manifest() { go run @MOD@/cmd/gen-manifest -dir .. "$@"; }
+if gen_manifest -write >/dev/null 2>&1 && go mod tidy >/dev/null 2>&1 && go build ./... >/dev/null 2>&1 && gen_manifest -check >/dev/null 2>&1; then
+  echo "==> 通过（VERSION / app.json / fnpack/manifest 已从清单派生）"
 else
-  echo "!! 自检失败。请进 $OUT/server 手动执行 go mod tidy 看原因" >&2
+  echo "!! 自检失败。请进 $OUT/server 依次手动执行：" >&2
+  echo "   go run @MOD@/cmd/gen-manifest -dir .. -write && go mod tidy && go build ./..." >&2
   exit 2
 fi
 
 cat <<"GOSRC"
 
 生成完成。已就绪：
-  server/main.go   应用身份注入
-  server/<包名>/   业务包：模型 + 分页列表 + 增改删 + 审计
-  Makefile / CI / VERSION / CHANGELOG / README / AGENTS / .gitignore / tmp/
+  server/appmanifest.json   身份与元数据唯一真源（VERSION / app.json / fnpack/manifest 由它派生）
+  server/main.go            embed 清单 + Inject 注入底座
+  server/<包名>/            业务包：模型 + 分页列表 + 增改删 + 审计
+  VERSION / app.json / fnpack/manifest（派生产物，改清单后 make gen）
+  Makefile（gen / check-meta）/ CI（含一致性门禁）/ CHANGELOG / README / AGENTS / .gitignore / tmp/
 
 还没做（公共库不提供，必须人工补）：
   1. 前端 web/：目前未抽包，从 smallgo/web 起步，按技能 mobile-ui 与 icon-design 调整
-  2. fnpack/ 与 app.json：同上起步，包名 6 个位置按记忆 fnos-packaging 核对
+  2. fnpack/ 的 cmd 脚本、wizard、图标：从 smallgo/fnpack 起步再核对（manifest 已生成）
   3. 自建 Gitea 建仓并推送（见记忆 sub-repositories.md）
   4. 父仓库 .gitignore 第 1 节补一行；按技能 app-analysis 建档案、更新 INDEX 总表与端口家族
   5. 门户 techfunway-web 补介绍页；按技能 local-app-instance 建本机 86xx 实例
