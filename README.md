@@ -82,6 +82,7 @@ curl -s localhost:8080/api/version
 | `kit/middleware` | 认证（Bearer / X-API-Key / 网关 Cookie）、限流、CORS |
 | `kit/security` | 登录保护与安全问题 |
 | `kit/sysconfig` | 运行期配置注册表（system/user 两级作用域、四种类型、internal 键不外泄） |
+| `kit/authz` | **「模块:动作」逐格权限决策引擎**：能力矩阵、角色默认、显式勾选覆盖、旧键展开、超管不可削减、gin 守卫（源自用药管理 2026-11-14 落地模式） |
 | `kit/audit` | 操作审计与导出 |
 | `kit/backup` | `VACUUM INTO` 快照、自动备份、下载删除与**本地上传恢复** |
 | `kit/update` | 版本检查（Gitee → GitHub 多渠道）与 fpk **自更新**（原子换装、回滚、re-exec） |
