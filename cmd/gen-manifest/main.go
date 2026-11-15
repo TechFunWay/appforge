@@ -55,8 +55,8 @@ func findManifest(dir string) (string, error) {
 	return "", errors.New("找不到 appmanifest.json（查过应用根目录与 server/）")
 }
 
-// targets 返回 文件名 → 内容 的派生表。
-func targets(dir string) (map[string][]byte, error) {
+// targets 返回 文件名 → 派生文件 的表（fnpack/ 前缀下含生命周期脚本文件组）。
+func targets(dir string) (map[string]manifest.RenderedFile, error) {
 	manifestPath, err := findManifest(dir)
 	if err != nil {
 		return nil, err
@@ -80,11 +80,20 @@ func targets(dir string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string][]byte{
-		"VERSION":         m.RenderVersionFile(),
-		"app.json":        appJSON,
-		"fnpack/manifest": m.RenderFnpackManifest(cl),
-	}, nil
+	out := map[string]manifest.RenderedFile{
+		"VERSION":         {Rel: "VERSION", Data: m.RenderVersionFile()},
+		"app.json":        {Rel: "app.json", Data: appJSON},
+		"fnpack/manifest": {Rel: "fnpack/manifest", Data: m.RenderFnpackManifest(cl)},
+	}
+	files, err := m.RenderFnpackFiles()
+	if err != nil {
+		return nil, err
+	}
+	for rel, f := range files {
+		f.Rel = "fnpack/" + rel
+		out["fnpack/"+rel] = f
+	}
+	return out, nil
 }
 
 // run 执行 write 或 check，返回退出码（0 通过 / 1 有差异）与错误。
@@ -97,10 +106,10 @@ func run(dir string, write bool) (int, error) {
 	for name := range tt {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Strings(names) // 稳定顺序：write/check 输出可比对
 	bad := 0
 	for _, name := range names {
-		want := tt[name]
+		want := tt[name].Data
 		path := filepath.Join(dir, name)
 		cur, err := os.ReadFile(path)
 		exists := err == nil
@@ -115,7 +124,14 @@ func run(dir string, write bool) (int, error) {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return 0, err
 			}
-			if err := os.WriteFile(path, want, 0o644); err != nil {
+			mode := os.FileMode(0o644)
+			if tt[name].Exec {
+				mode = 0o755
+			}
+			if err := os.WriteFile(path, want, mode); err != nil {
+				return 0, err
+			}
+			if err := os.Chmod(path, mode); err != nil {
 				return 0, err
 			}
 			fmt.Printf("已写  %s\n", name)

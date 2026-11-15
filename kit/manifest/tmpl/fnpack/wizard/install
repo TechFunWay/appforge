@@ -1,0 +1,27 @@
+[
+  {
+    "stepTitle": "安装 {{.DisplayName}}",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "{{.Intro}}"
+      },
+      {
+        "type": "text",
+        "field": "wizard_service_port",
+        "label": "服务端口（1024-65535）",
+        "initValue": "{{.Port}}",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入端口号"
+          },
+          {
+            "pattern": "^[0-9]{4,5}$",
+            "message": "请输入 1024-65535 之间的端口号"
+          }
+        ]
+      }
+    ]
+  }
+]

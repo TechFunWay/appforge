@@ -55,6 +55,9 @@ type Manifest struct {
 	// UpdateRepo 是发版仓库 owner/repo；留空推导为 "TechFunWay/" + Name。
 	UpdateRepo string `json:"updateRepo,omitempty"`
 
+	// Intro 是安装向导介绍段；留空由 desc 加家族通用说明拼出。
+	Intro string `json:"intro,omitempty"`
+
 	Author        string `json:"author,omitempty"`
 	Website       string `json:"website,omitempty"`
 	Maintainer    string `json:"maintainer,omitempty"`

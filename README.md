@@ -74,7 +74,7 @@ curl -s localhost:8080/api/version
 | `kit/config` | 启动参数与环境变量（`-port`、`-data-dir`、`-fnos-app`、`-gateway-prefix` 等） |
 | `kit/version` | 构建信息与应用身份（`Identity` / `Configure`；一般经 `kit/manifest` 注入） |
 | `kit/manifest` | **应用清单唯一真源**：`appmanifest.json` 的解析、大小写敏感校验、身份注入与打包元数据派生 |
-| `cmd/gen-manifest` | 构建期工具：从清单 + CHANGELOG.md 派生 `VERSION` / `app.json` / `fnpack/manifest`，`-check` 做一致性门禁 |
+| `cmd/gen-manifest` | 构建期工具：从清单 + CHANGELOG.md 派生 `VERSION` / `app.json` 与**整个 fnpack 目录**（manifest、生命周期脚本、wizard、桌面入口、数据共享声明），`-check` 做一致性门禁 |
 | `kit/logger` | 文件日志、保留策略、可选同时输出终端 |
 | `kit/database` | GORM + SQLite（WAL、外键、单连接）、模型注册、版本化升降级、用户删除守卫与清理钩子 |
 | `kit/auth` | JWT 签发与校验，TTL 跟随 `login_expiry_days` |

@@ -399,12 +399,13 @@ cat <<"GOSRC"
   server/appmanifest.json   身份与元数据唯一真源（VERSION / app.json / fnpack/manifest 由它派生）
   server/main.go            embed 清单 + Inject 注入底座
   server/<包名>/            业务包：模型 + 分页列表 + 增改删 + 审计
-  VERSION / app.json / fnpack/manifest（派生产物，改清单后 make gen）
+  VERSION / app.json / fnpack/**（派生产物：manifest + 生命周期脚本 + wizard + 桌面入口，
+  全部由 gen-manifest 从清单渲染，改清单后 make gen）
   Makefile（gen / check-meta）/ CI（含一致性门禁）/ CHANGELOG / README / AGENTS / .gitignore / tmp/
 
 还没做（公共库不提供，必须人工补）：
   1. 前端 web/：目前未抽包，从 smallgo/web 起步，按技能 mobile-ui 与 icon-design 调整
-  2. fnpack/ 的 cmd 脚本、wizard、图标：从 smallgo/fnpack 起步再核对（manifest 已生成）
+  2. 图标：fnpack/ICON*.PNG 与 app/ui/images/icon_*.png（按技能 icon-design 渲染后放入）
   3. 自建 Gitea 建仓并推送（见记忆 sub-repositories.md）
   4. 父仓库 .gitignore 第 1 节补一行；按技能 app-analysis 建档案、更新 INDEX 总表与端口家族
   5. 门户 techfunway-web 补介绍页；按技能 local-app-instance 建本机 86xx 实例
