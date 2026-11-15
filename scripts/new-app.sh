@@ -78,8 +78,7 @@ import (
 
 // appmanifest.json 是应用身份与打包元数据的唯一真源（清单坏了应用起不来，
 // 这是特性不是缺陷：绝不带着错误身份继续跑）。
-//
-@TAB@//go:embed appmanifest.json
+//go:embed appmanifest.json
 var manifestData []byte
 
 func main() {
@@ -154,14 +153,15 @@ package @PKG@
 
 import "time"
 
-// Item 是示例业务表：按用户隔离。
+// Item 是示例业务表：按用户隔离。json 标签保持家族 snake_case 口径，
+// 前端与测试都按小写字段取数。
 type Item struct {
-@TAB@ID        uint      `gorm:"primarykey"`
-@TAB@UserID    uint      `gorm:"index;not null"`
-@TAB@Title     string    `gorm:"size:200;not null"`
-@TAB@Note      string    `gorm:"size:2000"`
-@TAB@CreatedAt time.Time
-@TAB@UpdatedAt time.Time
+@TAB@ID        uint      `gorm:"primarykey" json:"id"`
+@TAB@UserID    uint      `gorm:"index;not null" json:"user_id"`
+@TAB@Title     string    `gorm:"size:200;not null" json:"title"`
+@TAB@Note      string    `gorm:"size:2000" json:"note"`
+@TAB@CreatedAt time.Time `json:"created_at"`
+@TAB@UpdatedAt time.Time `json:"updated_at"`
 }
 GOSRC
 
@@ -380,14 +380,16 @@ jobs:
       - run: cd server && go test ./...
 GOSRC
 
-echo "==> 自检：派生元数据 + go mod tidy + go build + 一致性校验"
+# 顺序有讲究：go run 依赖 go.sum，必须先 tidy 再调 gen-manifest。
+echo "==> 自检：整理格式 + go mod tidy + 派生元数据 + go build + 一致性校验"
 cd "$OUT/server"
+gofmt -w .
 gen_manifest() { go run @MOD@/cmd/gen-manifest -dir .. "$@"; }
-if gen_manifest -write >/dev/null 2>&1 && go mod tidy >/dev/null 2>&1 && go build ./... >/dev/null 2>&1 && gen_manifest -check >/dev/null 2>&1; then
+if go mod tidy >/dev/null 2>&1 && gen_manifest -write >/dev/null 2>&1 && go build ./... >/dev/null 2>&1 && gen_manifest -check >/dev/null 2>&1; then
   echo "==> 通过（VERSION / app.json / fnpack/manifest 已从清单派生）"
 else
   echo "!! 自检失败。请进 $OUT/server 依次手动执行：" >&2
-  echo "   go run @MOD@/cmd/gen-manifest -dir .. -write && go mod tidy && go build ./..." >&2
+  echo "   go mod tidy && go run @MOD@/cmd/gen-manifest -dir .. -write && go build ./..." >&2
   exit 2
 fi
 
