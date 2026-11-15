@@ -17,7 +17,7 @@
 set -euo pipefail
 
 MOD=github.com/TechFunWay/appforge
-LIB_VERSION=v0.0.3
+LIB_VERSION=v0.0.4
 
 if [[ $# -lt 2 ]]; then
   echo "用法: $0 仓库名 显示名 [默认端口] [生成目录]" >&2
